@@ -59,19 +59,21 @@ fresh data:
 
 **`watch` is recommended**: zero kicks, zero wear, zero internet. At night the
 inverter powers down and takes the datalogger with it — the integration then
-keeps the last-known values, flips the *Inverter online* binary sensor off,
-and the *Data age* sensor grows. No errors, no retry spam.
+flips the *Inverter online* binary sensor off and the *Data age* sensor grows.
+At the first poll after local midnight it resets the day counters (Yield today
+→ 0, Current power → 0) instead of carrying yesterday's values into the
+morning; the lifetime *Total yield* is never reset. No errors, no retry spam.
 
 ## Entities
 
 | Entity | Device class | Unit | Notes |
 |---|---|---|---|
 | Current power | power | W | live generation |
-| Yield today | energy | kWh | `total_increasing` → Energy dashboard |
+| Yield today | energy | kWh | `total_increasing` → Energy dashboard; resets to 0 at local midnight |
 | Total yield | energy | kWh | `total_increasing`; `unavailable` until the stick reports a confirmed total |
 | Inverter temperature | temperature | °C | |
 | Last updated | timestamp | — | when the readout was taken |
-| Data age | — | s | freshness of the last real read |
+| Data age | — | s | how long since the current state was produced |
 | Inverter model / Firmware / Serial | — | — | diagnostics |
 | **Inverter online** (binary) | connectivity | — | off at night when the inverter powers down |
 | **Alerts** (binary) | problem | — | on when the datalogger reports YES |
@@ -97,8 +99,9 @@ the grid-import sensor or your battery controller for a trigger).
 - **Values don't change for ~5 minutes** — that's `watch` mode working as
   intended; `reboot` or `force_refresh` gives faster data.
 - **Everything bounces every night** — expected: the stick is
-  inverter-powered. Home Assistant keeps the last values; automations should
-  key off *Inverter online* / *Data age* rather than raw values.
+  inverter-powered. At local midnight the day counters reset to 0, and Home
+  Assistant keeps those values until the morning read; automations should key
+  off *Inverter online* / *Data age* rather than raw values.
 - **Multiple dataloggers** — supported: add the integration once per
   datalogger.
 

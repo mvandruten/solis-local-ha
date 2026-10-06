@@ -12,8 +12,10 @@ repeats its inverter read roughly every 5 minutes on its own:
 * ``none``: single best-effort read, give up fast.
 
 The stick is powered by the inverter: at night it is unreachable. After a
-few failed reads we stop, keep the last-known values, and flip
-``inverter_online`` off -- the local probe IS the source of truth here.
+few failed reads we stop, carry the last-known values (or, once local
+midnight has passed, a day-reset snapshot with the daily counters zeroed),
+and flip ``inverter_online`` off -- the local probe IS the source of truth
+here.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from .const import (
     DEFAULT_REFRESH_MODE,
     DOMAIN,
 )
-from .models import InverterSnapshot, is_populated
+from .models import InverterSnapshot, is_populated, reset_for_new_day
 from .parser import parse_inverter_cgi
 
 _LOGGER = logging.getLogger(__name__)
@@ -152,6 +154,14 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
         )
         if snapshot is None:
             if previous is not None:
+                # First poll after local midnight with no fresh read: the day
+                # counters restart at zero instead of carrying yesterday's
+                # values forward until the morning read. TOTAL_INCREASING
+                # sensors (yield today) document a daily reset as the start of
+                # a new meter cycle, so HA's statistics handle this cleanly.
+                reset = reset_for_new_day(previous, now)
+                if reset is not None:
+                    return reset
                 return self._aged(previous, now, stale=True)
             raise UpdateFailed("cgi unreachable and no previous data available")
 

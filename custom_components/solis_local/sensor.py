@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -94,6 +96,19 @@ class SolisSensor(CoordinatorEntity[SolisCoordinator], SensorEntity):
             model=snapshot.inverter_model if snapshot else None,
             sw_version=snapshot.firmware_version if snapshot else None,
         )
+
+    @property
+    def last_reset(self) -> datetime | None:
+        """When the accumulating total was last re-zeroed (midnight reset).
+
+        ``yield_today_kwh`` resets at local midnight (TOTAL_INCREASING "new
+        meter cycle"); every other total (e.g. total yield) never resets, so
+        ``last_reset`` stays ``None`` per the HA sensor contract.
+        """
+        if self.entity_description.key != "yield_today_kwh":
+            return None
+        snapshot: InverterSnapshot | None = self.coordinator.data
+        return snapshot.last_reset if snapshot else None
 
     @property
     def native_value(self):

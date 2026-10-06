@@ -1,6 +1,6 @@
 [project]
 name = "solis-local-ha"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fully-local Solis datalogger readout for Home Assistant (HACS)"
 requires-python = ">=3.12"
 dependencies = []

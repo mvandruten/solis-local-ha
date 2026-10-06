@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from custom_components.solis_local.models import (
     InverterSnapshot,
     is_populated,
+    reset_for_new_day,
     snapshot_from_dict,
     snapshot_to_dict,
 )
@@ -56,3 +57,51 @@ def test_real_snapshot_is_populated() -> None:
     assert is_populated(InverterSnapshot(firmware_version="91004C", inverter_model="501")) is True
     # firmware may be empty on odd syncs; a real model alone still counts.
     assert is_populated(InverterSnapshot(firmware_version="0", inverter_model="501")) is True
+
+
+TZ = timezone(timedelta(hours=2))
+
+
+def test_reset_for_new_day_rolls_over() -> None:
+    previous = InverterSnapshot(
+        serial_no="180501024A150053",
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=29.1,
+        current_power_w=570,
+        yield_today_kwh=12.4,
+        total_yield_kwh=3456.7,
+        alerts=False,
+        inverter_online=True,
+        last_updated=datetime(2026, 10, 6, 20, 30, tzinfo=TZ),
+    )
+    now = datetime(2026, 10, 7, 0, 3, tzinfo=TZ)
+    reset = reset_for_new_day(previous, now)
+    assert reset is not None
+    # Day counters restart at zero, device fields and the lifetime total stay.
+    assert reset.yield_today_kwh == 0.0
+    assert reset.current_power_w == 0
+    assert reset.inverter_temperature_c is None
+    assert reset.alerts is False
+    assert reset.inverter_online is False
+    assert reset.total_yield_kwh == 3456.7
+    assert reset.serial_no == "180501024A150053"
+    assert reset.firmware_version == "91004C"
+    assert reset.inverter_model == "501"
+    # The reset is the moment the meter cycle restarted.
+    assert reset.last_updated == now
+    assert reset.last_reset == now
+    assert reset.stale is True
+
+
+def test_reset_for_new_day_same_day_returns_none() -> None:
+    previous = InverterSnapshot(
+        current_power_w=570,
+        yield_today_kwh=12.4,
+        last_updated=datetime(2026, 10, 6, 23, 59, tzinfo=TZ),
+    )
+    assert reset_for_new_day(previous, datetime(2026, 10, 6, 23, 59, 30, tzinfo=TZ)) is None
+
+
+def test_reset_for_new_day_without_timestamp_returns_none() -> None:
+    assert reset_for_new_day(InverterSnapshot(yield_today_kwh=12.4), datetime(2026, 10, 7, tzinfo=TZ)) is None
