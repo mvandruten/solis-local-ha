@@ -112,15 +112,11 @@ class SolisSensor(CoordinatorEntity[SolisCoordinator], SensorEntity):
 
     @property
     def native_value(self):
-        snapshot: InverterSnapshot | None = self.coordinator.data
-        if snapshot is None:
-            return None
-        value = getattr(snapshot, self.entity_description.key)
-        if (
-            self.entity_description.device_class == SensorDeviceClass.TIMESTAMP
-            and value is not None
-        ):
-            return value.isoformat()
+        value = getattr(self.coordinator.data, self.entity_description.key, None) if self.coordinator.data else None
+        # Return raw values untouched. HA's SensorEntity.state converts a
+        # TIMESTAMP native_value itself: since 2024.x it expects an actual
+        # datetime object (it casts to datetime and reads .tzinfo) and raises
+        # ValueError on an ISO string -> the entity would show "Unknown".
         return value
 
 

@@ -11,14 +11,24 @@ from datetime import datetime
 
 
 def is_populated(snapshot: InverterSnapshot) -> bool:
-    """True when the cgi payload is real data, not the all-zero placeholder.
+    """True when the cgi payload is real data, not a zeroed/partial buffer.
 
-    The datalogger serves a zeroed buffer (firmware ``0`` / model ``0``) while
-    a refresh is applied and in its normal idle state; only a non-zero
-    firmware or model identifies a genuinely populated readout.
+    The datalogger serves a zeroed buffer (firmware ``0`` / model ``0``)
+    while idle, and -- as observed live (2026-10-06) -- populates the RAM
+    buffer field-by-field over ~1 s: a *partial* read can carry a real
+    firmware/model (and even power/yield) while temperature is still ``0.0``,
+    with the full readout arriving 0.5 s later. Requiring a non-zero
+    temperature (a reachable inverter is never at exactly 0.0 C) makes the
+    gate accept only the full buffer, so HA shows the real value instead of
+    catching the leading partial read.
     """
-
-    return snapshot.firmware_version not in ("", "0") or snapshot.inverter_model not in ("", "0")
+    if not (
+        snapshot.firmware_version not in ("", "0")
+        or snapshot.inverter_model not in ("", "0")
+    ):
+        return False
+    temp = snapshot.inverter_temperature_c
+    return temp is not None and temp != 0.0
 
 
 @dataclass(frozen=True, slots=True)

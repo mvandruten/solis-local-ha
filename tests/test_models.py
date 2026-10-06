@@ -53,10 +53,38 @@ def test_placeholder_snapshot_is_not_populated() -> None:
     assert is_populated(InverterSnapshot()) is False
 
 
+def test_partial_buffer_is_not_populated() -> None:
+    # Observed live (2026-10-06): the stick serves a partial populated buffer
+    # (real firmware/model, temp still 0.0) ~0.5s before the full readout.
+    partial = InverterSnapshot(
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=0.0,
+        current_power_w=240,
+        yield_today_kwh=5.8,
+    )
+    assert is_populated(partial) is False
+
+
 def test_real_snapshot_is_populated() -> None:
-    assert is_populated(InverterSnapshot(firmware_version="91004C", inverter_model="501")) is True
+    assert is_populated(
+        InverterSnapshot(
+            firmware_version="91004C", inverter_model="501", inverter_temperature_c=31.0
+        )
+    ) is True
     # firmware may be empty on odd syncs; a real model alone still counts.
-    assert is_populated(InverterSnapshot(firmware_version="0", inverter_model="501")) is True
+    assert is_populated(
+        InverterSnapshot(
+            firmware_version="0", inverter_model="501", inverter_temperature_c=31.0
+        )
+    ) is True
+    # A warm-but-zero-power readout is still real data.
+    assert is_populated(
+        InverterSnapshot(
+            firmware_version="91004C", inverter_model="501",
+            inverter_temperature_c=12.4, current_power_w=0,
+        )
+    ) is True
 
 
 TZ = timezone(timedelta(hours=2))

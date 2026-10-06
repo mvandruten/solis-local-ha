@@ -98,6 +98,13 @@ the grid-import sensor or your battery controller for a trigger).
   itself, then the sensor stays available.
 - **Values don't change for ~5 minutes** — that's `watch` mode working as
   intended; `reboot` or `force_refresh` gives faster data.
+- **Temperature shows 0.0 °C** — the stick fills its RAM buffer field by
+  field over ~1 s (firmware/model arrive before temperature); the populated
+  gate now waits for the full readout, so partial reads are retried instead
+  of displayed. If it ever persists, check the raw page in a browser.
+- **Last updated shows Unknown** — needs 0.2.2+: HA 2024+ requires TIMESTAMP
+  sensors to return a datetime object; 0.2.1 returned a string which HA
+  rejected. Upgrade, then the timestamp renders normally.
 - **Everything bounces every night** — expected: the stick is
   inverter-powered. At local midnight the day counters reset to 0, and Home
   Assistant keeps those values until the morning read; automations should key
