@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - "custom_components/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Pytest
+        run: uv run pytest

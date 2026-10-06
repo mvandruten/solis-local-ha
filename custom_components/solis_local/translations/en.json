@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solis Inverter Local",
+        "description": "Connect to your Solis datalogger's local status page (http://<ip>/inverter.cgi). Both fields come from the label on the datalogger or its web UI.",
+        "data": {
+          "datalogger_ip": "Datalogger IP address",
+          "datalogger_password": "Datalogger password",
+          "poll_interval": "Poll interval (seconds)",
+          "refresh_timeout": "Read timeout (seconds)",
+          "refresh_mode": "Refresh mode"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the datalogger on this IP (check it is powered and on the same network).",
+      "invalid_auth": "The datalogger rejected the password."
+    },
+    "abort": {
+      "already_configured": "This datalogger is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Solis Inverter Local options",
+        "data": {
+          "poll_interval": "Poll interval (seconds)",
+          "refresh_timeout": "Read timeout (seconds)",
+          "refresh_mode": "Refresh mode"
+        }
+      }
+    }
+  }
+}

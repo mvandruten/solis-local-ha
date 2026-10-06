@@ -1,0 +1,19 @@
+[project]
+name = "solis-local-ha"
+version = "0.2.0"
+description = "Fully-local Solis datalogger readout for Home Assistant (HACS)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

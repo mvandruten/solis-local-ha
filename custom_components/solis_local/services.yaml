@@ -1,0 +1,7 @@
+force_refresh:
+  name: Force refresh
+  description: >-
+    Re-read the datalogger's local status page now. In watch mode this waits
+    for the stick's own read cycle (fresh data within ~5 minutes); in reboot
+    mode the datalogger is rebooted first (fresh data within ~30 seconds).
+  fields: {}
