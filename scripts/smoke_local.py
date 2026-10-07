@@ -80,13 +80,13 @@ async def main() -> int:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + args.timeout
     down_attempts = 0
-    last = None
+    best = None
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
         while True:
             elapsed = args.timeout - max(0.0, deadline - loop.time())
             try:
                 raw = await api.read_inverter_cgi(session, host, password)
-                if last is None:
+                if best is None:
                     print("raw head:", repr(raw.replace("\x00", "").strip()[:120]))
                 down_attempts = 0
                 snap = parser_mod.parse_inverter_cgi(
@@ -98,40 +98,48 @@ async def main() -> int:
                     f"today={snap.yield_today_kwh}kWh total={snap.total_yield_kwh}kWh "
                     f"alerts={snap.alerts} serial={snap.serial_no}"
                 )
-                if models.is_populated(snap):
-                    # The stick fills its RAM buffer field-by-field; briefly
-                    # keep polling inside the window and UNION the reads so a
-                    # later read backfills what the first one missed.
-                    best = snap
-                    for _ in range(3):
-                        if loop.time() >= deadline:
-                            break
-                        await asyncio.sleep(0.5)
-                        try:
-                            settle_raw = await api.read_inverter_cgi(session, host, password)
-                        except aiohttp.ClientError:
-                            break
-                        settle_snap = parser_mod.parse_inverter_cgi(
-                            settle_raw, read_at=datetime.now(UTC).astimezone()
-                        )
-                        if not models.is_populated(settle_snap):
-                            break
-                        best = models.merge_readout_fields(best, settle_snap)
-                        if best.serial_no:
-                            break
-                    print(json.dumps(models.snapshot_to_dict(best), indent=2, ensure_ascii=False))
-                    return 0
-                last = snap
+                if models.is_placeholder(snap):
+                    # Idle buffer: a window that was open just closed -- the
+                    # stick's own "window closed" signal. Serve what we got.
+                    if best is not None:
+                        print(json.dumps(
+                            models.snapshot_to_dict(models.finalize_readout(best)),
+                            indent=2, ensure_ascii=False,
+                        ))
+                        return 0
+                    # Never saw a window yet: keep waiting for one.
+                else:
+                    # Window open: collect + union; later reads backfill the
+                    # earlier zeros (see merge_readout_fields).
+                    best = (
+                        snap
+                        if best is None
+                        else models.merge_readout_fields(best, snap)
+                    )
             except aiohttp.ClientError as err:
+                if best is not None:
+                    # Mid-window blip: keep what we have.
+                    print(json.dumps(
+                        models.snapshot_to_dict(models.finalize_readout(best)),
+                        indent=2, ensure_ascii=False,
+                    ))
+                    return 0
                 down_attempts += 1
                 if down_attempts >= MAX_DOWN_ATTEMPTS:
                     print(f"error: datalogger unreachable after {MAX_DOWN_ATTEMPTS} attempts ({err})")
                     return 1
             if loop.time() >= deadline:
+                if best is not None:
+                    # Deadline mid-window: serve whatever the window carried.
+                    print(json.dumps(
+                        models.snapshot_to_dict(models.finalize_readout(best)),
+                        indent=2, ensure_ascii=False,
+                    ))
+                    return 0
                 break
             await asyncio.sleep(0.5)
 
-    print("no populated payload within the timeout (datalogger idle / cloud-synced buffer stale)")
+    print("no populated window within the timeout (datalogger idle / cloud-synced buffer stale)")
     return 2
 
 
