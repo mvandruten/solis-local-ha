@@ -76,7 +76,6 @@ class InverterSnapshot:
     last_updated: datetime | None = None
     last_reset: datetime | None = None
     raw: str = ""
-    data_age_s: float = 0.0
     stale: bool = False
 
 
@@ -129,7 +128,6 @@ def merge_readout_fields(
         last_updated=candidate.last_updated or current.last_updated,
         last_reset=current.last_reset,
         raw=candidate.raw or current.raw,
-        data_age_s=current.data_age_s,
         stale=current.stale,
     )
 
@@ -166,7 +164,6 @@ def reset_for_new_day(
         last_updated=now,
         last_reset=now,
         raw=previous.raw,
-        data_age_s=0.0,
         stale=True,
     )
 
@@ -185,7 +182,6 @@ def snapshot_to_dict(snapshot: InverterSnapshot) -> dict:
         "inverter_online": snapshot.inverter_online,
         "last_updated": snapshot.last_updated.isoformat() if snapshot.last_updated else None,
         "last_reset": snapshot.last_reset.isoformat() if snapshot.last_reset else None,
-        "data_age_s": snapshot.data_age_s,
         "stale": snapshot.stale,
     }
 
@@ -204,7 +200,6 @@ def snapshot_from_dict(data: dict) -> InverterSnapshot:
         inverter_online=data.get("inverter_online"),
         last_updated=_parse_dt(data.get("last_updated")),
         last_reset=_parse_dt(data.get("last_reset")),
-        data_age_s=float(data.get("data_age_s", 0.0)),
         stale=bool(data.get("stale", False)),
     )
 

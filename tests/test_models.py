@@ -249,3 +249,12 @@ def test_merge_keeps_genuine_zero_power() -> None:
     merged = merge_readout_fields(a, b)
     assert merged.current_power_w == 0
     assert merged.yield_today_kwh == 0.0
+
+
+def test_snapshot_dict_has_no_data_age_key() -> None:
+    assert "data_age_s" not in snapshot_to_dict(SNAPSHOT)
+
+
+def test_snapshot_from_dict_tolerates_legacy_data_age_key() -> None:
+    back = snapshot_from_dict({**snapshot_to_dict(SNAPSHOT), "data_age_s": 42.0})
+    assert back.serial_no == SNAPSHOT.serial_no
