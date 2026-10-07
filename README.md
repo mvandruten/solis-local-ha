@@ -59,7 +59,7 @@ fresh data:
 
 **`watch` is recommended**: zero kicks, zero wear, zero internet. At night the
 inverter powers down and takes the datalogger with it — the integration then
-flips the *Inverter online* binary sensor off and the *Data age* sensor grows.
+carries the last-known values with `stale: true` and *Inverter online* off.
 At the first poll after local midnight it resets the day counters (Yield today
 → 0, Current power → 0) instead of carrying yesterday's values into the
 morning; the lifetime *Total yield* is never reset. No errors, no retry spam.
@@ -73,9 +73,8 @@ morning; the lifetime *Total yield* is never reset. No errors, no retry spam.
 | Total yield | energy | kWh | `total_increasing`; `unavailable` until the stick reports a confirmed total |
 | Inverter temperature | temperature | °C | |
 | Last updated | timestamp | — | when the readout was taken |
-| Data age | — | s | how long since the current state was produced |
 | Inverter model / Firmware / Serial | — | — | diagnostics |
-| **Inverter online** (binary) | connectivity | — | off at night when the inverter powers down |
+| **Inverter online** (binary) | connectivity | — | on while the datalogger answers HTTP at all (placeholder body included); off only when the stick is unreachable (inverter powered down at night) |
 | **Alerts** (binary) | problem | — | on when the datalogger reports YES |
 
 **Energy dashboard:** Settings → Energy → *Solar production* → add **Yield
@@ -98,15 +97,15 @@ the grid-import sensor or your battery controller for a trigger).
   itself, then the sensor stays available.
 - **Values don't change for ~5 minutes** — that's `watch` mode working as
   intended; `reboot` or `force_refresh` gives faster data.
-- **Temperature shows 0.0 °C** — the stick fills its RAM buffer field by
-  field over ~1 s (firmware/model arrive before temperature); the populated
-  gate waits for at least one late field (temperature or serial), so partial
-  reads are retried instead of displayed. If temperature itself ever stops
-  reporting, serial keeps the readout alive — no single field is
-  load-bearing.
+- **Temperature shows 0.0 °C / Unknown** — the integration collects the
+  whole populated window (any real field opens it, reads are unioned until
+  the stick returns to its idle placeholder) and serves whatever the window
+  carried. A `0.0` temperature is the stick's "not written yet" marker and
+  is reported as Unknown — never asserted as a real reading. A window that
+  closes with the temperature still unfilled self-heals on the next cycle.
 - **Serial number sometimes blank** — serial is the *last* field the stick
-  writes, ~0.5 s after the rest of the readout. 0.2.3+ briefly keeps polling
-  inside the populated window and unions the reads so serial (or any field
+  writes, ~0.5 s after the rest of the readout. The collector keeps unioning
+  reads inside the populated window until it closes, so serial (or any field
   still missing on the first read) is backfilled. Serial can still be
   genuinely absent for whole windows on odd syncs — data is always delivered
   rather than blocking on the missing field.
@@ -121,7 +120,8 @@ the grid-import sensor or your battery controller for a trigger).
 - **Everything bounces every night** — expected: the stick is
   inverter-powered. At local midnight the day counters reset to 0, and Home
   Assistant keeps those values until the morning read; automations should key
-  off *Inverter online* / *Data age* rather than raw values.
+  off `stale` (true = not a fresh readout, e.g. aged carry-forward or the
+  midnight reset) and *Inverter online* rather than raw values.
 - **Multiple dataloggers** — supported: add the integration once per
   datalogger.
 
