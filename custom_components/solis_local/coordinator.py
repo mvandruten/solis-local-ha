@@ -16,6 +16,10 @@ few failed reads we stop, carry the last-known values (or, once local
 midnight has passed, a day-reset snapshot with the daily counters zeroed),
 and flip ``inverter_online`` off -- the local probe IS the source of truth
 here.
+
+``inverter_online`` reflects reachability -- the cgi answered at all,
+placeholder body or not. ``stale`` means the snapshot is not a fresh
+readout (aged carry-forward / midnight reset), never "incomplete read".
 """
 
 from __future__ import annotations
@@ -179,7 +183,6 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
         previous = self.data
         mode = str(self._config.get(CONF_REFRESH_MODE, DEFAULT_REFRESH_MODE)).lower()
 
-        stale = False
         timeout_s = float(self._config[CONF_REFRESH_TIMEOUT])
         give_up_if_down = mode in ("none", "watch")
         if mode == "reboot":
@@ -188,35 +191,29 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
             if not await restart_datalogger(
                 self._lan_session, self._host, self._datalogger_password
             ):
-                stale = True
+                _LOGGER.warning("datalogger restart failed; waiting for its own read loop")
             timeout_s = max(timeout_s, REBOOT_WAIT_S)
         else:
             # Kick-less ("none", "watch"): wait for the stick's own read loop
             # to repopulate the buffer (one full cycle as the outer bound).
             timeout_s = max(timeout_s, WATCH_WAIT_S)
 
-        snapshot = await self._read_populated(
+        snapshot, reachable = await self._read_populated(
             timeout_s, give_up_if_down=give_up_if_down
         )
         if snapshot is None:
             if previous is not None:
                 # First poll after local midnight with no fresh read: the day
-                # counters restart at zero instead of carrying yesterday's
-                # values forward until the morning read. TOTAL_INCREASING
-                # sensors (yield today) document a daily reset as the start of
-                # a new meter cycle, so HA's statistics handle this cleanly.
+                # counters restart at zero (TOTAL_INCREASING "new meter
+                # cycle"). Otherwise carry the last-known values forward.
                 reset = reset_for_new_day(previous, now)
                 if reset is not None:
                     return reset
-                return self._aged(previous, now, stale=True)
+                return self._aged(previous, now, online=reachable)
             raise UpdateFailed("cgi unreachable and no previous data available")
 
-        # Fully local mode, no cloud status: the probe is the truth.
-        online = is_populated(snapshot)
-
-        age = 0.0
-        if stale and previous is not None and previous.last_updated is not None:
-            age = max(0.0, (now - previous.last_updated).total_seconds())
+        # A collected window union is by definition freshly read this cycle
+        # (and the probe answered, so the stick is reachable).
         return InverterSnapshot(
             serial_no=snapshot.serial_no,
             firmware_version=snapshot.firmware_version,
@@ -226,20 +223,21 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
             yield_today_kwh=snapshot.yield_today_kwh,
             total_yield_kwh=snapshot.total_yield_kwh,
             alerts=snapshot.alerts,
-            inverter_online=online,
+            inverter_online=True,
             last_updated=snapshot.last_updated,
             raw=snapshot.raw,
-            stale=stale or not is_populated(snapshot),
-            data_age_s=age,
+            stale=False,
         )
 
     def _aged(
-        self, previous: InverterSnapshot, now: datetime, stale: bool
+        self, previous: InverterSnapshot, now: datetime, online: bool
     ) -> InverterSnapshot:
-        """Carry the last-known values forward when the probe is unreachable."""
-        age = 0.0
-        if previous.last_updated is not None:
-            age = max(0.0, (now - previous.last_updated).total_seconds())
+        """Carry the last-known values forward when no fresh read arrived.
+
+        ``online`` is reachability, not data freshness: the stick may have
+        answered HTTP while serving its idle placeholder (missed window) --
+        the inverter is still online, but the values are not fresh.
+        """
         return InverterSnapshot(
             serial_no=previous.serial_no,
             firmware_version=previous.firmware_version,
@@ -249,9 +247,8 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
             yield_today_kwh=previous.yield_today_kwh,
             total_yield_kwh=previous.total_yield_kwh,
             alerts=previous.alerts,
-            inverter_online=False,
+            inverter_online=online,
             last_updated=previous.last_updated,
             raw=previous.raw,
             stale=True,
-            data_age_s=age,
         )
