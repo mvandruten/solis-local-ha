@@ -81,8 +81,16 @@ class InverterSnapshot:
 
 
 def _field_empty(value: object) -> bool:
-    """True when a snapshot field carries no data (missing str or None)."""
-    return value is None or value == ""
+    """True when a field carries no data yet (not-yet-written placeholder).
+
+    Within one populated window the stick fills fields monotonically
+    (missing -> real, never contradict), so ``0``/``0.0``/``""`` all mean
+    "not written yet" here -- safe for power/yield too, because a genuine
+    zero appears in EVERY read of a window (the union keeps it zero), while a
+    pre-fill zero is backfilled by the next read's real value. The closing
+    placeholder read is never merged, so real values can't be clobbered.
+    """
+    return value is None or value in ("", "0", "0.0") or value == 0
 
 
 def merge_readout_fields(
@@ -93,9 +101,12 @@ def merge_readout_fields(
     The stick serves the same snapshot repeatedly while filling its RAM
     buffer field-by-field over ~1 s, serial last (observed live 2026-10-06).
     Reads within one window never contradict -- same values, monotonic fill
-    order -- so unioning can only complete the readout: fields already
-    present in ``current`` are kept, only empty ones are backfilled from the
-    later ``candidate``. ``last_updated`` follows the newest read.
+    order. Fields fill monotonically (missing -> real), and within the
+    window ``0``/``0.0``/``""`` are "not written yet" markers, so a later
+    read's real value backfills an earlier zero; genuine zeros (an idle
+    inverter) appear in EVERY read of the window, so the union keeps them.
+    The closing placeholder read is never merged, so collected real values
+    can't be clobbered. ``last_updated`` follows the newest read.
     """
     fields = (
         "serial_no",

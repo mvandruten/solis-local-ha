@@ -194,7 +194,7 @@ def test_merge_readout_fields_never_overwrites_present_values() -> None:
         firmware_version="91004C",
         inverter_model="501",
         inverter_temperature_c=30.7,
-        current_power_w=0,  # zero is a real value, not "missing"
+        current_power_w=0,  # genuine zero: every read in the window carries it -> union keeps it
         yield_today_kwh=5.8,
     )
     later = InverterSnapshot(
@@ -208,3 +208,44 @@ def test_merge_readout_fields_never_overwrites_present_values() -> None:
     merged = merge_readout_fields(first, later)
     assert merged.serial_no == "180501024A150053"
     assert merged.current_power_w == 0
+
+
+def test_merge_backfills_zero_temperature() -> None:
+    # Leading partial read: identity+power real, temp still the stick's
+    # "not written yet" 0.0. The completed read 0.5 s later must win.
+    first = InverterSnapshot(
+        firmware_version="91004C", inverter_model="501", inverter_temperature_c=0.0,
+        current_power_w=570, yield_today_kwh=5.8,
+        last_updated=datetime(2026, 10, 6, 16, 35, 0, tzinfo=TZ),
+    )
+    later = InverterSnapshot(
+        firmware_version="91004C", inverter_model="501", inverter_temperature_c=29.1,
+        current_power_w=570, yield_today_kwh=5.8,
+        last_updated=datetime(2026, 10, 6, 16, 35, 1, tzinfo=TZ),
+    )
+    merged = merge_readout_fields(first, later)
+    assert merged.inverter_temperature_c == 29.1
+
+
+def test_merge_backfills_zero_power() -> None:
+    # Same monotonic-fill logic for any field a firmware variant fills late.
+    first = InverterSnapshot(
+        firmware_version="91004C", inverter_model="501", current_power_w=0,
+    )
+    later = InverterSnapshot(
+        firmware_version="91004C", inverter_model="501", current_power_w=520,
+    )
+    assert merge_readout_fields(first, later).current_power_w == 520
+
+
+def test_merge_keeps_genuine_zero_power() -> None:
+    # Genuinely idle readout: every read in the window carries 0 -> stays 0.
+    a = InverterSnapshot(firmware_version="91004C", inverter_model="501",
+                         inverter_temperature_c=12.4, current_power_w=0,
+                         yield_today_kwh=0.0)
+    b = InverterSnapshot(firmware_version="91004C", inverter_model="501",
+                         inverter_temperature_c=12.4, current_power_w=0,
+                         yield_today_kwh=0.0)
+    merged = merge_readout_fields(a, b)
+    assert merged.current_power_w == 0
+    assert merged.yield_today_kwh == 0.0
