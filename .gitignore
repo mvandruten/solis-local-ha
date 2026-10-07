@@ -11,3 +11,5 @@ build/
 *.egg-info/
 .DS_Store
 Thumbs.db
+burst_probe_*.jsonl
+.hermes/
