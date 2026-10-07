@@ -55,6 +55,21 @@ class InverterSnapshot:
     stale: bool = False
 
 
+def prefer_serial_bearing_readout(
+    current: InverterSnapshot, candidate: InverterSnapshot
+) -> InverterSnapshot:
+    """Prefer the readout that carries the serial number.
+
+    The stick fills its RAM buffer field-by-field over ~1 s: serial is written
+    LAST, ~0.5 s after temperature (observed live, 2026-10-06). Within one
+    populated window the values are identical, so the only reason to swap is
+    completeness -- a read with a serial is the most complete snapshot.
+    Serial can also be genuinely absent for a whole window, so callers must
+    fall back to ``current`` in that case (never block waiting for it).
+    """
+    return candidate if candidate.serial_no else current
+
+
 def reset_for_new_day(
     previous: InverterSnapshot, now: datetime
 ) -> InverterSnapshot | None:

@@ -39,7 +39,12 @@ from .const import (
     DEFAULT_REFRESH_MODE,
     DOMAIN,
 )
-from .models import InverterSnapshot, is_populated, reset_for_new_day
+from .models import (
+    InverterSnapshot,
+    is_populated,
+    prefer_serial_bearing_readout,
+    reset_for_new_day,
+)
 from .parser import parse_inverter_cgi
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +55,10 @@ REBOOT_WAIT_S = 90.0
 # The stick runs its own ~5-min read loop and serves the populated buffer only
 # ~1 s per cycle; watch mode waits one full cycle (plus margin) for it.
 WATCH_WAIT_S = 330.0
+# Serial is the LAST field the stick writes into its RAM buffer, ~0.5 s after
+# the rest of the readout (observed live 2026-10-06). Once a populated read
+# appears, keep polling this many more times to catch a serial-bearing read.
+SERIAL_SETTLE_READS = 3
 # Kick-less local modes give up after this many consecutive unreachable reads
 # (the stick is powered by the inverter: unreachable = inverter asleep).
 MAX_DOWN_ATTEMPTS = 3
@@ -114,7 +123,30 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
                 down_attempts = 0
                 snapshot = parse_inverter_cgi(raw, read_at=datetime.now().astimezone())
                 if is_populated(snapshot):
-                    return snapshot
+                    # Serial is written last (~0.5 s after the rest); the
+                    # populated window lasts ~1.6 s, so briefly keep polling
+                    # and prefer the readout that carries the serial. Genuinely
+                    # serial-less windows fall back to the first populated read.
+                    best = snapshot
+                    for _ in range(SERIAL_SETTLE_READS):
+                        if time.monotonic() >= deadline:
+                            break
+                        await asyncio.sleep(RETRY_STEP_S)
+                        try:
+                            settle_raw = await read_inverter_cgi(
+                                self._lan_session, self._host, self._datalogger_password
+                            )
+                        except aiohttp.ClientError:
+                            break  # stick mid-window: keep what we have
+                        settle_snap = parse_inverter_cgi(
+                            settle_raw, read_at=datetime.now().astimezone()
+                        )
+                        if not is_populated(settle_snap):
+                            break  # populated window closed
+                        best = prefer_serial_bearing_readout(best, settle_snap)
+                        if best.serial_no:
+                            break  # complete readout
+                    return best
                 last = snapshot
             except aiohttp.ClientError:
                 down_attempts += 1

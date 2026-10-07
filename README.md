@@ -102,6 +102,16 @@ the grid-import sensor or your battery controller for a trigger).
   field over ~1 s (firmware/model arrive before temperature); the populated
   gate now waits for the full readout, so partial reads are retried instead
   of displayed. If it ever persists, check the raw page in a browser.
+- **Serial number sometimes blank** — serial is the *last* field the stick
+  writes, ~0.5 s after the rest of the readout. 0.2.3+ briefly keeps polling
+  inside the populated window to catch the serial-bearing read. Serial can
+  still be genuinely absent for whole windows on odd syncs — never block on
+  it, the integration falls back gracefully.
+- **Total yield shows Unknown (ukWh)** — the datalogger itself reports the
+  lifetime total as `u` = unknown and never sends a number for it (the
+  SolisCloud portal renders the same "ukWh"). This is not a capture/timing
+  issue: the field is genuinely absent from the payload. It resolves only if
+  the device ever confirms a value.
 - **Last updated shows Unknown** — needs 0.2.2+: HA 2024+ requires TIMESTAMP
   sensors to return a datetime object; 0.2.1 returned a string which HA
   rejected. Upgrade, then the timestamp renders normally.

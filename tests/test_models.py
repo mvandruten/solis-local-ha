@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from custom_components.solis_local.models import (
     InverterSnapshot,
     is_populated,
+    prefer_serial_bearing_readout,
     reset_for_new_day,
     snapshot_from_dict,
     snapshot_to_dict,
@@ -133,3 +134,15 @@ def test_reset_for_new_day_same_day_returns_none() -> None:
 
 def test_reset_for_new_day_without_timestamp_returns_none() -> None:
     assert reset_for_new_day(InverterSnapshot(yield_today_kwh=12.4), datetime(2026, 10, 7, tzinfo=TZ)) is None
+
+
+def test_prefer_serial_bearing_readout() -> None:
+    noserial = InverterSnapshot(firmware_version="91004C", inverter_model="501", inverter_temperature_c=30.7)
+    withserial = InverterSnapshot(
+        serial_no="180501024A150053", firmware_version="91004C",
+        inverter_model="501", inverter_temperature_c=30.7,
+    )
+    # A serial-bearing candidate wins; a serial-less one never replaces it.
+    assert prefer_serial_bearing_readout(noserial, withserial) is withserial
+    assert prefer_serial_bearing_readout(withserial, noserial) is withserial
+    assert prefer_serial_bearing_readout(noserial, noserial) is noserial

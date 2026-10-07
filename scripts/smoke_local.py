@@ -99,7 +99,26 @@ async def main() -> int:
                     f"alerts={snap.alerts} serial={snap.serial_no}"
                 )
                 if models.is_populated(snap):
-                    print(json.dumps(models.snapshot_to_dict(snap), indent=2, ensure_ascii=False))
+                    # Serial is written last (~0.5 s after the rest); settle to
+                    # prefer the serial-bearing readout like the coordinator.
+                    best = snap
+                    for _ in range(3):
+                        if loop.time() >= deadline:
+                            break
+                        await asyncio.sleep(0.5)
+                        try:
+                            settle_raw = await api.read_inverter_cgi(session, host, password)
+                        except aiohttp.ClientError:
+                            break
+                        settle_snap = parser_mod.parse_inverter_cgi(
+                            settle_raw, read_at=datetime.now(UTC).astimezone()
+                        )
+                        if not models.is_populated(settle_snap):
+                            break
+                        best = models.prefer_serial_bearing_readout(best, settle_snap)
+                        if best.serial_no:
+                            break
+                    print(json.dumps(models.snapshot_to_dict(best), indent=2, ensure_ascii=False))
                     return 0
                 last = snap
             except aiohttp.ClientError as err:
