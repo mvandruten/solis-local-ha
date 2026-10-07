@@ -104,9 +104,10 @@ the grid-import sensor or your battery controller for a trigger).
   of displayed. If it ever persists, check the raw page in a browser.
 - **Serial number sometimes blank** — serial is the *last* field the stick
   writes, ~0.5 s after the rest of the readout. 0.2.3+ briefly keeps polling
-  inside the populated window to catch the serial-bearing read. Serial can
-  still be genuinely absent for whole windows on odd syncs — never block on
-  it, the integration falls back gracefully.
+  inside the populated window and unions the reads so serial (or any field
+  still missing on the first read) is backfilled. Serial can still be
+  genuinely absent for whole windows on odd syncs — data is always delivered
+  rather than blocking on the missing field.
 - **Total yield shows Unknown (ukWh)** — the datalogger itself reports the
   lifetime total as `u` = unknown and never sends a number for it (the
   SolisCloud portal renders the same "ukWh"). This is not a capture/timing

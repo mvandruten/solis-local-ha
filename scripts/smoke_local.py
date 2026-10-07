@@ -99,8 +99,9 @@ async def main() -> int:
                     f"alerts={snap.alerts} serial={snap.serial_no}"
                 )
                 if models.is_populated(snap):
-                    # Serial is written last (~0.5 s after the rest); settle to
-                    # prefer the serial-bearing readout like the coordinator.
+                    # The stick fills its RAM buffer field-by-field; briefly
+                    # keep polling inside the window and UNION the reads so a
+                    # later read backfills what the first one missed.
                     best = snap
                     for _ in range(3):
                         if loop.time() >= deadline:
@@ -115,7 +116,7 @@ async def main() -> int:
                         )
                         if not models.is_populated(settle_snap):
                             break
-                        best = models.prefer_serial_bearing_readout(best, settle_snap)
+                        best = models.merge_readout_fields(best, settle_snap)
                         if best.serial_no:
                             break
                     print(json.dumps(models.snapshot_to_dict(best), indent=2, ensure_ascii=False))

@@ -42,7 +42,7 @@ from .const import (
 from .models import (
     InverterSnapshot,
     is_populated,
-    prefer_serial_bearing_readout,
+    merge_readout_fields,
     reset_for_new_day,
 )
 from .parser import parse_inverter_cgi
@@ -123,10 +123,11 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
                 down_attempts = 0
                 snapshot = parse_inverter_cgi(raw, read_at=datetime.now().astimezone())
                 if is_populated(snapshot):
-                    # Serial is written last (~0.5 s after the rest); the
-                    # populated window lasts ~1.6 s, so briefly keep polling
-                    # and prefer the readout that carries the serial. Genuinely
-                    # serial-less windows fall back to the first populated read.
+                    # The stick fills its RAM buffer field-by-field over ~1 s
+                    # (serial last); briefly keep polling inside the populated
+                    # window and UNION the reads so a later read backfills
+                    # whatever the first one missed. Genuinely incomplete
+                    # windows fall back to what we have -- never block.
                     best = snapshot
                     for _ in range(SERIAL_SETTLE_READS):
                         if time.monotonic() >= deadline:
@@ -143,9 +144,9 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
                         )
                         if not is_populated(settle_snap):
                             break  # populated window closed
-                        best = prefer_serial_bearing_readout(best, settle_snap)
+                        best = merge_readout_fields(best, settle_snap)
                         if best.serial_no:
-                            break  # complete readout
+                            break  # readout complete (serial is written last)
                     return best
                 last = snapshot
             except aiohttp.ClientError:

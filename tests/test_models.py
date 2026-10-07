@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from custom_components.solis_local.models import (
     InverterSnapshot,
     is_populated,
-    prefer_serial_bearing_readout,
+    merge_readout_fields,
     reset_for_new_day,
     snapshot_from_dict,
     snapshot_to_dict,
@@ -136,13 +136,52 @@ def test_reset_for_new_day_without_timestamp_returns_none() -> None:
     assert reset_for_new_day(InverterSnapshot(yield_today_kwh=12.4), datetime(2026, 10, 7, tzinfo=TZ)) is None
 
 
-def test_prefer_serial_bearing_readout() -> None:
-    noserial = InverterSnapshot(firmware_version="91004C", inverter_model="501", inverter_temperature_c=30.7)
-    withserial = InverterSnapshot(
-        serial_no="180501024A150053", firmware_version="91004C",
-        inverter_model="501", inverter_temperature_c=30.7,
+def test_merge_readout_fields_backfills_missing() -> None:
+    first = InverterSnapshot(
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=30.7,
+        current_power_w=240,
+        yield_today_kwh=5.8,
+        last_updated=datetime(2026, 10, 6, 16, 35, 0, tzinfo=TZ),
     )
-    # A serial-bearing candidate wins; a serial-less one never replaces it.
-    assert prefer_serial_bearing_readout(noserial, withserial) is withserial
-    assert prefer_serial_bearing_readout(withserial, noserial) is withserial
-    assert prefer_serial_bearing_readout(noserial, noserial) is noserial
+    later = InverterSnapshot(
+        serial_no="180501024A150053",
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=30.7,
+        current_power_w=240,
+        yield_today_kwh=5.8,
+        last_updated=datetime(2026, 10, 6, 16, 35, 1, tzinfo=TZ),
+    )
+    merged = merge_readout_fields(first, later)
+    # Serial (the last-written field) is backfilled from the later read.
+    assert merged.serial_no == "180501024A150053"
+    # Fields already present in the first read are kept untouched.
+    assert merged.inverter_temperature_c == 30.7
+    assert merged.current_power_w == 240
+    assert merged.yield_today_kwh == 5.8
+    # last_updated follows the newest read.
+    assert merged.last_updated == later.last_updated
+
+
+def test_merge_readout_fields_never_overwrites_present_values() -> None:
+    first = InverterSnapshot(
+        serial_no="180501024A150053",
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=30.7,
+        current_power_w=0,  # zero is a real value, not "missing"
+        yield_today_kwh=5.8,
+    )
+    later = InverterSnapshot(
+        serial_no="",  # odd-sync: later read lost the serial again
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=30.7,
+        current_power_w=0,
+        yield_today_kwh=5.8,
+    )
+    merged = merge_readout_fields(first, later)
+    assert merged.serial_no == "180501024A150053"
+    assert merged.current_power_w == 0

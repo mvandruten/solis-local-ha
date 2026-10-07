@@ -55,19 +55,47 @@ class InverterSnapshot:
     stale: bool = False
 
 
-def prefer_serial_bearing_readout(
+def _field_empty(value: object) -> bool:
+    """True when a snapshot field carries no data (missing str or None)."""
+    return value is None or value == ""
+
+
+def merge_readout_fields(
     current: InverterSnapshot, candidate: InverterSnapshot
 ) -> InverterSnapshot:
-    """Prefer the readout that carries the serial number.
+    """Union the fields of two reads from the same populated window.
 
-    The stick fills its RAM buffer field-by-field over ~1 s: serial is written
-    LAST, ~0.5 s after temperature (observed live, 2026-10-06). Within one
-    populated window the values are identical, so the only reason to swap is
-    completeness -- a read with a serial is the most complete snapshot.
-    Serial can also be genuinely absent for a whole window, so callers must
-    fall back to ``current`` in that case (never block waiting for it).
+    The stick serves the same snapshot repeatedly while filling its RAM
+    buffer field-by-field over ~1 s, serial last (observed live 2026-10-06).
+    Reads within one window never contradict -- same values, monotonic fill
+    order -- so unioning can only complete the readout: fields already
+    present in ``current`` are kept, only empty ones are backfilled from the
+    later ``candidate``. ``last_updated`` follows the newest read.
     """
-    return candidate if candidate.serial_no else current
+    fields = (
+        "serial_no",
+        "firmware_version",
+        "inverter_model",
+        "inverter_temperature_c",
+        "current_power_w",
+        "yield_today_kwh",
+        "total_yield_kwh",
+    )
+    values = {}
+    for field in fields:
+        cur = getattr(current, field)
+        cand = getattr(candidate, field)
+        values[field] = cur if not _field_empty(cur) else cand
+    return InverterSnapshot(
+        **values,
+        alerts=current.alerts,
+        inverter_online=current.inverter_online,
+        last_updated=candidate.last_updated or current.last_updated,
+        last_reset=current.last_reset,
+        raw=candidate.raw or current.raw,
+        data_age_s=current.data_age_s,
+        stale=current.stale,
+    )
 
 
 def reset_for_new_day(
