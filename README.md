@@ -100,8 +100,10 @@ the grid-import sensor or your battery controller for a trigger).
   intended; `reboot` or `force_refresh` gives faster data.
 - **Temperature shows 0.0 °C** — the stick fills its RAM buffer field by
   field over ~1 s (firmware/model arrive before temperature); the populated
-  gate now waits for the full readout, so partial reads are retried instead
-  of displayed. If it ever persists, check the raw page in a browser.
+  gate waits for at least one late field (temperature or serial), so partial
+  reads are retried instead of displayed. If temperature itself ever stops
+  reporting, serial keeps the readout alive — no single field is
+  load-bearing.
 - **Serial number sometimes blank** — serial is the *last* field the stick
   writes, ~0.5 s after the rest of the readout. 0.2.3+ briefly keeps polling
   inside the populated window and unions the reads so serial (or any field

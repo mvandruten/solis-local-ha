@@ -14,21 +14,27 @@ def is_populated(snapshot: InverterSnapshot) -> bool:
     """True when the cgi payload is real data, not a zeroed/partial buffer.
 
     The datalogger serves a zeroed buffer (firmware ``0`` / model ``0``)
-    while idle, and -- as observed live (2026-10-06) -- populates the RAM
-    buffer field-by-field over ~1 s: a *partial* read can carry a real
-    firmware/model (and even power/yield) while temperature is still ``0.0``,
-    with the full readout arriving 0.5 s later. Requiring a non-zero
-    temperature (a reachable inverter is never at exactly 0.0 C) makes the
-    gate accept only the full buffer, so HA shows the real value instead of
-    catching the leading partial read.
+    while idle, and -- as observed live (2026-10-06) -- populates its RAM
+    buffer field-by-field over ~1 s: power/yield arrive first, temperature
+    next, serial LAST. A *partial* read can therefore carry real
+    firmware/model (and power/yield) while BOTH late fields -- temperature
+    and serial -- are still empty.
+
+    To tell a complete readout from a partial one without making any single
+    field load-bearing, the gate requires device identity (firmware/model)
+    PLUS at least one late field to be filled (temperature non-zero, or
+    serial non-empty). If the temperature field ever dies but serial keeps
+    filling (or vice versa), readouts still pass; only a readout with both
+    late fields missing is treated as incomplete.
     """
     if not (
         snapshot.firmware_version not in ("", "0")
         or snapshot.inverter_model not in ("", "0")
     ):
         return False
-    temp = snapshot.inverter_temperature_c
-    return temp is not None and temp != 0.0
+    temp_filled = snapshot.inverter_temperature_c not in (None, 0.0)
+    serial_filled = snapshot.serial_no != ""
+    return temp_filled or serial_filled
 
 
 @dataclass(frozen=True, slots=True)

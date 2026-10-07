@@ -67,6 +67,20 @@ def test_partial_buffer_is_not_populated() -> None:
     assert is_populated(partial) is False
 
 
+def test_dead_temperature_with_serial_still_populated() -> None:
+    # If the temperature field dies but the serial keeps filling, readouts
+    # must still pass the gate -- no single field is load-bearing.
+    snapshot = InverterSnapshot(
+        serial_no="180501024A150053",
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=0.0,
+        current_power_w=240,
+        yield_today_kwh=5.8,
+    )
+    assert is_populated(snapshot) is True
+
+
 def test_real_snapshot_is_populated() -> None:
     assert is_populated(
         InverterSnapshot(
