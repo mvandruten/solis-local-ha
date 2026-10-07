@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from custom_components.solis_local.models import (
     InverterSnapshot,
-    is_populated,
+    finalize_readout,
+    is_placeholder,
     merge_readout_fields,
     reset_for_new_day,
     snapshot_from_dict,
@@ -49,57 +50,65 @@ def test_bad_timestamp_parses_to_none() -> None:
     assert back.last_updated is None
 
 
-def test_placeholder_snapshot_is_not_populated() -> None:
-    assert is_populated(InverterSnapshot(firmware_version="0", inverter_model="0")) is False
-    assert is_populated(InverterSnapshot()) is False
+def test_placeholder_snapshot_is_placeholder() -> None:
+    assert is_placeholder(InverterSnapshot(firmware_version="0", inverter_model="0")) is True
+    assert is_placeholder(InverterSnapshot()) is True
+    # all-zero placeholder: identity, temp, power and serial all zero/empty
+    assert is_placeholder(InverterSnapshot(
+        firmware_version="0", inverter_model="0", inverter_temperature_c=0.0,
+        current_power_w=0, yield_today_kwh=0.0, serial_no="",
+    )) is True
 
 
-def test_partial_buffer_is_not_populated() -> None:
-    # Observed live (2026-10-06): the stick serves a partial populated buffer
-    # (real firmware/model, temp still 0.0) ~0.5s before the full readout.
+def test_partial_buffer_with_identity_is_not_placeholder() -> None:
+    # Observed live (2026-10-06): a partial read has real identity/power while
+    # temp is still 0.0 -- that is a POPULATED window opening, not the idle buffer.
     partial = InverterSnapshot(
-        firmware_version="91004C",
-        inverter_model="501",
-        inverter_temperature_c=0.0,
-        current_power_w=240,
-        yield_today_kwh=5.8,
+        firmware_version="91004C", inverter_model="501", inverter_temperature_c=0.0,
+        current_power_w=240, yield_today_kwh=5.8,
     )
-    assert is_populated(partial) is False
+    assert is_placeholder(partial) is False
 
 
-def test_dead_temperature_with_serial_still_populated() -> None:
-    # If the temperature field dies but the serial keeps filling, readouts
-    # must still pass the gate -- no single field is load-bearing.
+def test_dead_temperature_with_serial_still_not_placeholder() -> None:
+    # No single field is load-bearing: temp dead + serial filling = real data.
     snapshot = InverterSnapshot(
-        serial_no="180501024A150053",
-        firmware_version="91004C",
-        inverter_model="501",
-        inverter_temperature_c=0.0,
-        current_power_w=240,
-        yield_today_kwh=5.8,
+        serial_no="180501024A150053", firmware_version="91004C",
+        inverter_model="501", inverter_temperature_c=0.0,
+        current_power_w=240, yield_today_kwh=5.8,
     )
-    assert is_populated(snapshot) is True
+    assert is_placeholder(snapshot) is False
 
 
-def test_real_snapshot_is_populated() -> None:
-    assert is_populated(
-        InverterSnapshot(
-            firmware_version="91004C", inverter_model="501", inverter_temperature_c=31.0
-        )
-    ) is True
+def test_real_snapshot_is_not_placeholder() -> None:
+    assert is_placeholder(InverterSnapshot(
+        firmware_version="91004C", inverter_model="501", inverter_temperature_c=31.0,
+    )) is False
     # firmware may be empty on odd syncs; a real model alone still counts.
-    assert is_populated(
-        InverterSnapshot(
-            firmware_version="0", inverter_model="501", inverter_temperature_c=31.0
-        )
-    ) is True
-    # A warm-but-zero-power readout is still real data.
-    assert is_populated(
-        InverterSnapshot(
-            firmware_version="91004C", inverter_model="501",
-            inverter_temperature_c=12.4, current_power_w=0,
-        )
-    ) is True
+    assert is_placeholder(InverterSnapshot(
+        firmware_version="0", inverter_model="501", inverter_temperature_c=31.0,
+    )) is False
+    # A warm-but-zero-power readout is real data (idle inverter).
+    assert is_placeholder(InverterSnapshot(
+        firmware_version="91004C", inverter_model="501",
+        inverter_temperature_c=12.4, current_power_w=0,
+    )) is False
+
+
+def test_finalize_readout_maps_zero_temp_to_none() -> None:
+    s = InverterSnapshot(firmware_version="91004C", inverter_model="501",
+                         inverter_temperature_c=0.0, current_power_w=240,
+                         yield_today_kwh=5.8)
+    out = finalize_readout(s)
+    assert out.inverter_temperature_c is None
+    assert out.current_power_w == 240  # power 0 is never rewritten
+    assert out.serial_no == s.serial_no
+
+
+def test_finalize_readout_keeps_real_temp() -> None:
+    s = InverterSnapshot(firmware_version="91004C", inverter_model="501",
+                         inverter_temperature_c=29.1, current_power_w=240)
+    assert finalize_readout(s).inverter_temperature_c == 29.1
 
 
 TZ = timezone(timedelta(hours=2))

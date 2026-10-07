@@ -10,31 +10,50 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
-def is_populated(snapshot: InverterSnapshot) -> bool:
-    """True when the cgi payload is real data, not a zeroed/partial buffer.
+def is_placeholder(snapshot: InverterSnapshot) -> bool:
+    """True when the cgi body is the idle all-zero buffer.
 
-    The datalogger serves a zeroed buffer (firmware ``0`` / model ``0``)
-    while idle, and -- as observed live (2026-10-06) -- populates its RAM
-    buffer field-by-field over ~1 s: power/yield arrive first, temperature
-    next, serial LAST. A *partial* read can therefore carry real
-    firmware/model (and power/yield) while BOTH late fields -- temperature
-    and serial -- are still empty.
-
-    To tell a complete readout from a partial one without making any single
-    field load-bearing, the gate requires device identity (firmware/model)
-    PLUS at least one late field to be filled (temperature non-zero, or
-    serial non-empty). If the temperature field ever dies but serial keeps
-    filling (or vice versa), readouts still pass; only a readout with both
-    late fields missing is treated as incomplete.
+    The datalogger serves a fully zeroed page (firmware ``0`` / model ``0`` /
+    ``0W`` / ``0.0`` temp / empty serial) except for the ~1.6 s populated
+    window around each read. Any deviation -- a single real field -- is a
+    populated window opening; the device fills the rest within ~1 s. This is
+    a pure probe for window detection, NOT a completeness score.
     """
-    if not (
-        snapshot.firmware_version not in ("", "0")
-        or snapshot.inverter_model not in ("", "0")
-    ):
-        return False
-    temp_filled = snapshot.inverter_temperature_c not in (None, 0.0)
-    serial_filled = snapshot.serial_no != ""
-    return temp_filled or serial_filled
+    return (
+        snapshot.firmware_version in ("", "0")
+        and snapshot.inverter_model in ("", "0")
+        and snapshot.inverter_temperature_c in (None, 0.0)
+        and snapshot.current_power_w in (None, 0)
+        and snapshot.yield_today_kwh in (None, 0.0)
+        and snapshot.total_yield_kwh in (None, 0.0)
+        and snapshot.serial_no == ""
+    )
+
+
+def finalize_readout(snapshot: InverterSnapshot) -> InverterSnapshot:
+    """Clean a collected window union for serving.
+
+    ``0.0`` in temperature is the stick's per-field "not written yet" marker,
+    never a genuine measurement (a producing inverter cannot sit at exactly
+    0.0 C) -- if the window closed before any read carried a real temperature,
+    report it as unknown instead of asserting an impossible reading. Power
+    keeps 0 as a real value (idle inverter).
+    """
+    if snapshot.inverter_temperature_c == 0.0:
+        return InverterSnapshot(
+            **{f: getattr(snapshot, f) for f in (
+                "serial_no", "firmware_version", "inverter_model",
+                "current_power_w", "yield_today_kwh", "total_yield_kwh",
+            )},
+            inverter_temperature_c=None,
+            alerts=snapshot.alerts,
+            inverter_online=snapshot.inverter_online,
+            last_updated=snapshot.last_updated,
+            last_reset=snapshot.last_reset,
+            raw=snapshot.raw,
+            stale=snapshot.stale,
+        )
+    return snapshot
 
 
 @dataclass(frozen=True, slots=True)
