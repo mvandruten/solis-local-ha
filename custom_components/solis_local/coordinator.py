@@ -41,7 +41,8 @@ from .const import (
 )
 from .models import (
     InverterSnapshot,
-    is_populated,
+    finalize_readout,
+    is_placeholder,
     merge_readout_fields,
     reset_for_new_day,
 )
@@ -55,13 +56,25 @@ REBOOT_WAIT_S = 90.0
 # The stick runs its own ~5-min read loop and serves the populated buffer only
 # ~1 s per cycle; watch mode waits one full cycle (plus margin) for it.
 WATCH_WAIT_S = 330.0
-# Serial is the LAST field the stick writes into its RAM buffer, ~0.5 s after
-# the rest of the readout (observed live 2026-10-06). Once a populated read
-# appears, keep polling this many more times to catch a serial-bearing read.
-SERIAL_SETTLE_READS = 3
 # Kick-less local modes give up after this many consecutive unreachable reads
 # (the stick is powered by the inverter: unreachable = inverter asleep).
 MAX_DOWN_ATTEMPTS = 3
+
+
+def _readout_complete(snapshot: InverterSnapshot) -> bool:
+    """Nothing left that a later read in the window could backfill.
+
+    ``total_yield_kwh`` is excluded: the raw field is the literal ``u``
+    (genuinely unknown on this device), so no poll cadence will ever fill it.
+    """
+    return (
+        snapshot.serial_no != ""
+        and snapshot.firmware_version not in ("", "0")
+        and snapshot.inverter_model not in ("", "0")
+        and snapshot.inverter_temperature_c not in (None, 0.0)
+        and snapshot.current_power_w not in (None, 0)
+        and snapshot.yield_today_kwh not in (None, 0.0)
+    )
 
 
 class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
@@ -102,16 +115,22 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
 
     async def _read_populated(
         self, refresh_timeout_s: float, give_up_if_down: bool = False
-    ) -> InverterSnapshot | None:
-        """Read the cgi, retrying while it serves the empty placeholder.
+    ) -> tuple[InverterSnapshot | None, bool]:
+        """Collect one populated window; return ``(snapshot, reachable)``.
 
-        ``give_up_if_down`` (kick-less local modes): when the stick is
-        persistently unreachable (night -- it is powered by the inverter),
-        stop after a few attempts instead of burning the whole window.
+        The stick serves the populated buffer for only ~1.6 s per ~5-min
+        cycle and fills it field-by-field (identity -> power -> temp ->
+        serial). We start collecting the moment ANY real field appears and
+        keep unioning 0.5 s reads until the stick returns to its all-zero
+        placeholder -- the device's own "window closed" signal (no fixed
+        settle count). ``reachable`` is True whenever the cgi answered at
+        all this cycle: that is what ``inverter_online`` means, placeholder
+        body or not. The placeholder read that closes the window is never
+        merged. A deadline mid-window serves whatever was collected.
         """
         assert self._lan_session is not None
         deadline = time.monotonic() + refresh_timeout_s
-        last: InverterSnapshot | None = None
+        best: InverterSnapshot | None = None
         saw_server = False
         down_attempts = 0
         while True:
@@ -122,43 +141,37 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
                 saw_server = True
                 down_attempts = 0
                 snapshot = parse_inverter_cgi(raw, read_at=datetime.now().astimezone())
-                if is_populated(snapshot):
-                    # The stick fills its RAM buffer field-by-field over ~1 s
-                    # (serial last); briefly keep polling inside the populated
-                    # window and UNION the reads so a later read backfills
-                    # whatever the first one missed. Genuinely incomplete
-                    # windows fall back to what we have -- never block.
-                    best = snapshot
-                    for _ in range(SERIAL_SETTLE_READS):
-                        if time.monotonic() >= deadline:
-                            break
-                        await asyncio.sleep(RETRY_STEP_S)
-                        try:
-                            settle_raw = await read_inverter_cgi(
-                                self._lan_session, self._host, self._datalogger_password
-                            )
-                        except aiohttp.ClientError:
-                            break  # stick mid-window: keep what we have
-                        settle_snap = parse_inverter_cgi(
-                            settle_raw, read_at=datetime.now().astimezone()
-                        )
-                        if not is_populated(settle_snap):
-                            break  # populated window closed
-                        best = merge_readout_fields(best, settle_snap)
-                        if best.serial_no:
-                            break  # readout complete (serial is written last)
-                    return best
-                last = snapshot
+                if is_placeholder(snapshot):
+                    if best is not None:
+                        # Populated window closed: serve what we collected.
+                        return finalize_readout(best), True
+                    # Never saw a window yet: keep waiting for one.
+                else:
+                    # Window open: collect + union; later reads backfill the
+                    # earlier zeros (see merge_readout_fields).
+                    best = (
+                        snapshot
+                        if best is None
+                        else merge_readout_fields(best, snapshot)
+                    )
+                    if _readout_complete(best):
+                        return finalize_readout(best), True
             except aiohttp.ClientError:
+                if best is not None:
+                    # Mid-window blip: keep what we have.
+                    return finalize_readout(best), True
                 down_attempts += 1
                 if (
                     give_up_if_down
                     and not saw_server
                     and down_attempts >= MAX_DOWN_ATTEMPTS
                 ):
-                    return None
+                    return None, False
             if time.monotonic() >= deadline:
-                return last
+                return (
+                    (finalize_readout(best) if best is not None else None),
+                    saw_server,
+                )
             await asyncio.sleep(RETRY_STEP_S)
 
     async def _async_update_data(self) -> InverterSnapshot | None:
