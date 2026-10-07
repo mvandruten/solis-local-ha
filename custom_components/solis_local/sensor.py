@@ -68,13 +68,6 @@ SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:clock-outline",
     ),
-    SensorEntityDescription(
-        key="data_age_s",
-        name="Data age",
-        native_unit_of_measurement="s",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:timelapse",
-    ),
 )
 
 
