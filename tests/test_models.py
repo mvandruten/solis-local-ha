@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from custom_components.solis_local.models import (
     InverterSnapshot,
+    carry_forward,
     finalize_readout,
     is_placeholder,
     merge_readout_fields,
@@ -157,6 +158,69 @@ def test_reset_for_new_day_same_day_returns_none() -> None:
 
 def test_reset_for_new_day_without_timestamp_returns_none() -> None:
     assert reset_for_new_day(InverterSnapshot(yield_today_kwh=12.4), datetime(2026, 10, 7, tzinfo=TZ)) is None
+
+
+def test_carry_forward_offline_zeroes_power() -> None:
+    # Unreachable datalogger = inverter offline = generating no power.
+    previous = InverterSnapshot(
+        serial_no="180501024A150053",
+        firmware_version="91004C",
+        inverter_model="501",
+        inverter_temperature_c=29.1,
+        current_power_w=570,
+        yield_today_kwh=12.4,
+        total_yield_kwh=3456.7,
+        alerts=False,
+        inverter_online=True,
+        last_updated=datetime(2026, 10, 6, 23, 0, tzinfo=TZ),
+        last_reset=datetime(2026, 10, 6, 0, 0, tzinfo=TZ),
+    )
+    aged = carry_forward(previous, online=False)
+    # Power reads 0 (offline inverter), not the stale last-known value.
+    assert aged.current_power_w == 0
+    # Yield today only resets at local midnight -- preserved until then.
+    assert aged.yield_today_kwh == 12.4
+    # Everything else is last-known carry-forward; the reset marker persists.
+    assert aged.total_yield_kwh == 3456.7
+    assert aged.inverter_temperature_c == 29.1
+    assert aged.alerts is False
+    assert aged.serial_no == "180501024A150053"
+    assert aged.firmware_version == "91004C"
+    assert aged.inverter_model == "501"
+    assert aged.inverter_online is False
+    assert aged.last_updated == previous.last_updated
+    assert aged.last_reset == previous.last_reset
+    assert aged.stale is True
+
+
+def test_carry_forward_reachable_keeps_power() -> None:
+    # The stick answered HTTP (placeholder) but no populated window was caught
+    # this cycle: the inverter may well still be producing -- never invent a 0.
+    previous = InverterSnapshot(
+        current_power_w=570, yield_today_kwh=12.4, total_yield_kwh=3456.7
+    )
+    aged = carry_forward(previous, online=True)
+    assert aged.current_power_w == 570
+    assert aged.yield_today_kwh == 12.4
+    assert aged.inverter_online is True
+    assert aged.stale is True
+
+
+def test_carry_forward_keeps_reset_marker_after_midnight() -> None:
+    # First aged poll after a midnight reset must not lose the reset moment:
+    # yield_today is still 0 (same day), last_reset still points at midnight.
+    reset = reset_for_new_day(
+        InverterSnapshot(
+            yield_today_kwh=12.4,
+            last_updated=datetime(2026, 10, 6, 23, 0, tzinfo=TZ),
+        ),
+        datetime(2026, 10, 7, 0, 3, tzinfo=TZ),
+    )
+    assert reset is not None
+    aged = carry_forward(reset, online=False)
+    assert aged.yield_today_kwh == 0.0
+    assert aged.current_power_w == 0
+    assert aged.last_reset == reset.last_reset
 
 
 def test_merge_readout_fields_backfills_missing() -> None:

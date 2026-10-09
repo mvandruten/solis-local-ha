@@ -35,8 +35,11 @@ The setup flow asks for:
 | Read timeout | max seconds to wait per read attempt (default 10) |
 | Refresh mode | how fresh data is obtained (default **watch**) |
 
-After setup, **Configure** on the integration (⋮ → Options) lets you change
-poll interval / timeout / refresh mode without re-entering the password.
+After setup, **Configure** on the integration (⋮ → Options) lets you change the
+**datalogger IP address**, poll interval / timeout / refresh mode — and the
+password, if it ever changes. Leave the password field blank to keep the
+current one. Changes apply immediately (the integration reloads); no restart
+needed.
 
 > **Tip — give it a fixed address.** The datalogger's own static-IP page is
 > known to silently drop the IP unless IP/mask/gateway are all filled in, and
@@ -60,9 +63,11 @@ fresh data:
 **`watch` is recommended**: zero kicks, zero wear, zero internet. At night the
 inverter powers down and takes the datalogger with it — the integration then
 carries the last-known values with `stale: true` and *Inverter online* off.
-At the first poll after local midnight it resets the day counters (Yield today
-→ 0, Current power → 0) instead of carrying yesterday's values into the
-morning; the lifetime *Total yield* is never reset. No errors, no retry spam.
+Because an offline inverter generates no power, **Current power drops to 0** as
+soon as the datalogger becomes unreachable (instead of freezing at the last
+reading), while **Yield today keeps its value** — it only resets at the first
+poll after local midnight (Yield today → 0, Current power → 0); the lifetime
+*Total yield* is never reset. No errors, no retry spam.
 
 ## Entities
 

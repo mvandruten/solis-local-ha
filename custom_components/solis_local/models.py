@@ -168,6 +168,36 @@ def reset_for_new_day(
     )
 
 
+def carry_forward(previous: InverterSnapshot, online: bool) -> InverterSnapshot:
+    """Aged carry-forward when no fresh read arrived this cycle.
+
+    The datalogger is powered by the inverter, so an unreachable stick
+    (``online=False``) means the inverter is offline and generating no power:
+    report ``current_power_w`` as 0 rather than carrying a stale reading.
+    ``yield_today_kwh`` is NOT zeroed here -- it only resets once local
+    midnight passes (via :func:`reset_for_new_day`); an offline inverter at
+    night is the same day, so yesterday's yield stays until the rollover.
+    Temperature, the lifetime total and the device identity fields carry over
+    as last-known. ``stale`` is always set: nothing in this snapshot is a
+    fresh readout.
+    """
+    return InverterSnapshot(
+        serial_no=previous.serial_no,
+        firmware_version=previous.firmware_version,
+        inverter_model=previous.inverter_model,
+        inverter_temperature_c=previous.inverter_temperature_c,
+        current_power_w=0 if not online else previous.current_power_w,
+        yield_today_kwh=previous.yield_today_kwh,
+        total_yield_kwh=previous.total_yield_kwh,
+        alerts=previous.alerts,
+        inverter_online=online,
+        last_updated=previous.last_updated,
+        last_reset=previous.last_reset,
+        raw=previous.raw,
+        stale=True,
+    )
+
+
 def snapshot_to_dict(snapshot: InverterSnapshot) -> dict:
     """Stable dict form for JSON output (ISO-8601 timestamps)."""
     return {

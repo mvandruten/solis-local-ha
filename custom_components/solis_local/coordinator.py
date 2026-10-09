@@ -12,9 +12,11 @@ repeats its inverter read roughly every 5 minutes on its own:
 * ``none``: single best-effort read, give up fast.
 
 The stick is powered by the inverter: at night it is unreachable. After a
-few failed reads we stop, carry the last-known values (or, once local
-midnight has passed, a day-reset snapshot with the daily counters zeroed),
-and flip ``inverter_online`` off -- the local probe IS the source of truth
+few failed reads we stop and carry the last-known values forward with
+``stale`` set -- but an offline inverter generates no power, so ``current_power_w``
+drops to 0 while the datalogger is unreachable (yield today keeps its value
+until the first poll after local midnight, when the day counters are zeroed)
+-- and we flip ``inverter_online`` off; the local probe IS the source of truth
 here.
 
 ``inverter_online`` reflects reachability -- the cgi answered at all,
@@ -45,6 +47,7 @@ from .const import (
 )
 from .models import (
     InverterSnapshot,
+    carry_forward,
     finalize_readout,
     is_placeholder,
     merge_readout_fields,
@@ -209,7 +212,7 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
                 reset = reset_for_new_day(previous, now)
                 if reset is not None:
                     return reset
-                return self._aged(previous, now, online=reachable)
+                return carry_forward(previous, online=reachable)
             raise UpdateFailed("cgi unreachable and no previous data available")
 
         # A collected window union is by definition freshly read this cycle
@@ -227,28 +230,4 @@ class SolisCoordinator(DataUpdateCoordinator[InverterSnapshot | None]):
             last_updated=snapshot.last_updated,
             raw=snapshot.raw,
             stale=False,
-        )
-
-    def _aged(
-        self, previous: InverterSnapshot, now: datetime, online: bool
-    ) -> InverterSnapshot:
-        """Carry the last-known values forward when no fresh read arrived.
-
-        ``online`` is reachability, not data freshness: the stick may have
-        answered HTTP while serving its idle placeholder (missed window) --
-        the inverter is still online, but the values are not fresh.
-        """
-        return InverterSnapshot(
-            serial_no=previous.serial_no,
-            firmware_version=previous.firmware_version,
-            inverter_model=previous.inverter_model,
-            inverter_temperature_c=previous.inverter_temperature_c,
-            current_power_w=previous.current_power_w,
-            yield_today_kwh=previous.yield_today_kwh,
-            total_yield_kwh=previous.total_yield_kwh,
-            alerts=previous.alerts,
-            inverter_online=online,
-            last_updated=previous.last_updated,
-            raw=previous.raw,
-            stale=True,
         )

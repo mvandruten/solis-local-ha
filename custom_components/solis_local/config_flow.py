@@ -83,12 +83,41 @@ class SolisLocalOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # The IP may have changed; validate the (possibly new) address with
+            # a live probe before saving. A blank password field keeps the
+            # currently active one (merged data+options, as in setup).
+            current = {**self._entry.data, **self._entry.options}
+            stored_password = current.get(CONF_DATALOGGER_PASSWORD, "")
+            password = user_input.get(CONF_DATALOGGER_PASSWORD) or stored_password
+
+            result = await probe_datalogger(user_input[CONF_DATALOGGER_IP], password)
+            if result == "ok":
+                options = {
+                    CONF_DATALOGGER_IP: user_input[CONF_DATALOGGER_IP],
+                    CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
+                    CONF_REFRESH_TIMEOUT: user_input[CONF_REFRESH_TIMEOUT],
+                    CONF_REFRESH_MODE: user_input[CONF_REFRESH_MODE],
+                }
+                # Persist a new password only when one was typed; blank keeps
+                # the existing one (stored in entry.data) via the data+options
+                # merge in async_setup_entry.
+                if user_input.get(CONF_DATALOGGER_PASSWORD):
+                    options[CONF_DATALOGGER_PASSWORD] = user_input[
+                        CONF_DATALOGGER_PASSWORD
+                    ]
+                return self.async_create_entry(title="", data=options)
+            errors["base"] = "invalid_auth" if result == "invalid_auth" else "cannot_connect"
 
         data = {**self._entry.data, **self._entry.options}
         options_schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_DATALOGGER_IP, default=data.get(CONF_DATALOGGER_IP)
+                ): str,
+                # Never pre-fill the stored password; blank means "keep current".
+                vol.Optional(CONF_DATALOGGER_PASSWORD, default=""): str,
                 vol.Optional(
                     CONF_POLL_INTERVAL, default=data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
                 ): _range(60, 3600),
@@ -100,4 +129,6 @@ class SolisLocalOptionsFlow(OptionsFlow):
                 ): vol.In(REFRESH_MODES),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=options_schema)
+        return self.async_show_form(
+            step_id="init", data_schema=options_schema, errors=errors
+        )

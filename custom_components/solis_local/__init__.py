@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from .const import (
     CONF_DATALOGGER_IP,
     CONF_DATALOGGER_PASSWORD,
+    CONF_POLL_INTERVAL,
     DOMAIN,
     SERVICE_FORCE_REFRESH,
 )
@@ -26,17 +27,31 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the entry when its options change.
+
+    Without this, options edits (including a changed datalogger IP) would only
+    take effect on the next HA restart. Reloading rebuilds the coordinator with
+    the merged data+options config.
+    """
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Solis Inverter Local from a config entry."""
     config = {**entry.data, **entry.options}
     coordinator = SolisCoordinator(
         hass,
-        entry.data[CONF_DATALOGGER_IP],
-        entry.data[CONF_DATALOGGER_PASSWORD],
+        config[CONF_DATALOGGER_IP],
+        config[CONF_DATALOGGER_PASSWORD],
         config,
     )
     await coordinator.start()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    # Rebuild the coordinator whenever options are saved (new IP, cadence, ...)
+    # so the change applies without a restart.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     # First refresh in the background: in watch mode a populated read can take
     # a full stick cycle (~5 min) and must never block HA startup. Entities
@@ -57,8 +72,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug(
         "solis_local set up for %s (poll interval %ss)",
-        entry.data[CONF_DATALOGGER_IP],
-        config.get("poll_interval"),
+        config[CONF_DATALOGGER_IP],
+        config.get(CONF_POLL_INTERVAL),
     )
     return True
 
